@@ -3,9 +3,9 @@ Sensor platform for Avalon Miner.
 
 Entities created per miner:
   Hashrate
-    - Hashrate (av)          MH/s
-    - Hashrate (30 s)        MH/s
-    - Hashrate (1 m)         MH/s
+    - Hashrate (av)          TH/s / GH/s / MH/s  (auto-scaled)
+    - Hashrate (30 s)        TH/s / GH/s / MH/s  (auto-scaled)
+    - Hashrate (1 m)         TH/s / GH/s / MH/s  (auto-scaled)
   Temperature
     - Temperature (current)  °C
     - Temperature (average)  °C
@@ -24,7 +24,7 @@ Entities created per miner:
     - Hardware Errors
     - Best Share
     - Pool Rejected %        %
-    - Uptime                 s
+    - Uptime                 formatted string (e.g. "3d 14h 22m")
   Pool (first active pool)
     - Pool URL
     - Pool User
@@ -35,7 +35,7 @@ Entities created per miner:
     - MAC Address
   Per hashboard (dynamic, one set per board reported by the miner):
     - Board N Freq Zone 1–4  MHz
-    - Board N Hashrate        MH/s
+    - Board N Hashrate        TH/s / GH/s / MH/s  (auto-scaled)
 """
 from __future__ import annotations
 
@@ -56,7 +56,6 @@ from homeassistant.const import (
     UnitOfFrequency,
     UnitOfPower,
     UnitOfTemperature,
-    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -67,6 +66,52 @@ from .coordinator import AvalonMinerCoordinator
 from .miner_client import MinerData
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+def _format_hashrate(mhs: float) -> tuple[float, str]:
+    """
+    Convert a raw MH/s value to the most readable tier.
+
+    Returns (value, unit) where unit is one of "TH/s", "GH/s", or "MH/s".
+    Thresholds:
+      ≥ 1 000 000 MH/s  → TH/s  (1 TH/s = 1 000 000 MH/s)
+      ≥ 1 000     MH/s  → GH/s  (1 GH/s = 1 000 MH/s)
+      otherwise         → MH/s
+    """
+    if mhs >= 1_000_000:
+        return round(mhs / 1_000_000, 3), "TH/s"
+    if mhs >= 1_000:
+        return round(mhs / 1_000, 2), "GH/s"
+    return round(mhs, 2), "MH/s"
+
+
+def _format_uptime(seconds: int) -> str:
+    """
+    Format a duration in seconds as a human-readable string.
+
+    Examples:
+      59        → "59s"
+      3661      → "1h 1m 1s"
+      90061     → "1d 1h 1m"   (seconds dropped once hours are shown)
+      2 days+   → "2d 1h 3m"
+    """
+    if seconds < 0:
+        return "0s"
+    days, remainder = divmod(int(seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    if hours > 0:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes > 0:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
 
 
 @dataclass(frozen=True)
@@ -80,31 +125,8 @@ class AvalonSensorEntityDescription(SensorEntityDescription):
 # ---------------------------------------------------------------------------
 
 SENSOR_DESCRIPTIONS: tuple[AvalonSensorEntityDescription, ...] = (
-    # --- Hashrate ---
-    AvalonSensorEntityDescription(
-        key="hashrate_av",
-        name="Hashrate (Average)",
-        native_unit_of_measurement="MH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:pickaxe",
-        value_fn=lambda d: round(d.mhs_av, 2),
-    ),
-    AvalonSensorEntityDescription(
-        key="hashrate_30s",
-        name="Hashrate (30s)",
-        native_unit_of_measurement="MH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:pickaxe",
-        value_fn=lambda d: round(d.mhs_30s, 2),
-    ),
-    AvalonSensorEntityDescription(
-        key="hashrate_1m",
-        name="Hashrate (1m)",
-        native_unit_of_measurement="MH/s",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:pickaxe",
-        value_fn=lambda d: round(d.mhs_1m, 2),
-    ),
+    # --- Hashrate: handled by AvalonMinerHashrateSensor (auto-scaled unit) ---
+
     # --- Temperature ---
     AvalonSensorEntityDescription(
         key="temp_current",
@@ -220,10 +242,8 @@ SENSOR_DESCRIPTIONS: tuple[AvalonSensorEntityDescription, ...] = (
     AvalonSensorEntityDescription(
         key="uptime",
         name="Uptime",
-        native_unit_of_measurement=UnitOfTime.SECONDS,
-        device_class=SensorDeviceClass.DURATION,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        value_fn=lambda d: d.uptime_seconds,
+        icon="mdi:timer-outline",
+        value_fn=lambda d: _format_uptime(d.uptime_seconds),
     ),
     # --- Pool info (first pool) ---
     AvalonSensorEntityDescription(
@@ -279,6 +299,11 @@ async def async_setup_entry(
     # Static sensors
     for description in SENSOR_DESCRIPTIONS:
         entities.append(AvalonMinerSensor(coordinator, entry, description))
+
+    # Hashrate sensors (separate class so unit scales dynamically)
+    entities.append(AvalonMinerHashrateSensor(coordinator, entry, "av"))
+    entities.append(AvalonMinerHashrateSensor(coordinator, entry, "30s"))
+    entities.append(AvalonMinerHashrateSensor(coordinator, entry, "1m"))
 
     # Dynamic per-hashboard sensors will be added once we have real data
     # We schedule a one-time callback after the first successful poll.
@@ -353,6 +378,63 @@ class AvalonMinerBaseEntity(CoordinatorEntity[AvalonMinerCoordinator]):
             return False
         data: MinerData | None = self.coordinator.data
         return data is not None and data.online
+
+
+# ---------------------------------------------------------------------------
+# Auto-scaling hashrate sensor
+# ---------------------------------------------------------------------------
+
+_HASHRATE_FIELD = {
+    "av":  lambda d: d.mhs_av,
+    "30s": lambda d: d.mhs_30s,
+    "1m":  lambda d: d.mhs_1m,
+}
+_HASHRATE_LABEL = {
+    "av":  "Hashrate (Average)",
+    "30s": "Hashrate (30s)",
+    "1m":  "Hashrate (1m)",
+}
+
+
+class AvalonMinerHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
+    """
+    Hashrate sensor that automatically scales its unit to the appropriate tier:
+      MH/s → GH/s → TH/s
+    The unit is re-evaluated on every state update so the dashboard always
+    shows the most human-readable value.
+    """
+
+    def __init__(
+        self,
+        coordinator: AvalonMinerCoordinator,
+        entry: ConfigEntry,
+        period: str,  # "av", "30s", or "1m"
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._period = period
+        self._attr_unique_id = f"{self._ip}_hashrate_{period}"
+        self._attr_name = _HASHRATE_LABEL[period]
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_icon = "mdi:pickaxe"
+        self._attr_has_entity_name = True
+
+    @property
+    def native_value(self) -> float | None:
+        data: MinerData | None = self.coordinator.data
+        if not data or not data.online:
+            return None
+        mhs = _HASHRATE_FIELD[self._period](data)
+        value, _ = _format_hashrate(mhs)
+        return value
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        data: MinerData | None = self.coordinator.data
+        if not data or not data.online:
+            return "TH/s"
+        mhs = _HASHRATE_FIELD[self._period](data)
+        _, unit = _format_hashrate(mhs)
+        return unit
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +513,7 @@ class AvalonMinerHashboardFreqSensor(AvalonMinerBaseEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 class AvalonMinerHashboardHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
-    """Reports the hashrate for a specific hash board."""
+    """Reports the hashrate for a specific hash board, auto-scaled to TH/GH/MH."""
 
     def __init__(
         self,
@@ -443,17 +525,31 @@ class AvalonMinerHashboardHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
         self._board_id = board_id
         self._attr_unique_id = f"{self._ip}_board{board_id}_hashrate"
         self._attr_name = f"Board {board_id} Hashrate"
-        self._attr_native_unit_of_measurement = "MH/s"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_icon = "mdi:pickaxe"
         self._attr_has_entity_name = True
 
-    @property
-    def native_value(self) -> float | None:
+    def _board_mhs(self) -> float | None:
         data: MinerData | None = self.coordinator.data
         if not data or not data.online:
             return None
         for board in data.hashboards:
             if board.board_id == self._board_id:
-                return round(board.hashrate_mhs, 2)
+                return board.hashrate_mhs
         return None
+
+    @property
+    def native_value(self) -> float | None:
+        mhs = self._board_mhs()
+        if mhs is None:
+            return None
+        value, _ = _format_hashrate(mhs)
+        return value
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        mhs = self._board_mhs()
+        if mhs is None:
+            return "TH/s"
+        _, unit = _format_hashrate(mhs)
+        return unit
