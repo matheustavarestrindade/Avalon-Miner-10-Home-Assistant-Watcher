@@ -23,7 +23,8 @@ Entities created per miner:
     - Accepted Shares
     - Rejected Shares
     - Hardware Errors
-    - Best Share
+    - Best Share (Session)    scaled K/M/G/T  (resets on miner reboot)
+    - Best Share (All-Time)   scaled K/M/G/T  (persists across reboots via RestoreSensor)
     - Pool Rejected %        %
     - Uptime                 formatted string (e.g. "3d 14h 22m")
   Pool (first active pool)
@@ -45,6 +46,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -114,6 +116,29 @@ def _format_uptime(seconds: int) -> str:
     if minutes > 0:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
+
+
+def _format_share(raw: int) -> tuple[float, str]:
+    """
+    Scale a raw share difficulty value to the most readable tier.
+
+    Returns (value, suffix) e.g. (4.23, 'T') or (812.5, 'G').
+    Tiers (powers of 1000):
+      ≥ 1 000 000 000 000  → T  (trillion)
+      ≥ 1 000 000 000      → G  (billion)
+      ≥ 1 000 000          → M  (million)
+      ≥ 1 000              → K  (thousand)
+      otherwise            → raw integer, suffix ""
+    """
+    if raw >= 1_000_000_000_000:
+        return round(raw / 1_000_000_000_000, 3), "T"
+    if raw >= 1_000_000_000:
+        return round(raw / 1_000_000_000, 3), "G"
+    if raw >= 1_000_000:
+        return round(raw / 1_000_000, 3), "M"
+    if raw >= 1_000:
+        return round(raw / 1_000, 2), "K"
+    return float(raw), ""
 
 
 @dataclass(frozen=True)
@@ -235,13 +260,6 @@ SENSOR_DESCRIPTIONS: tuple[AvalonSensorEntityDescription, ...] = (
         value_fn=lambda d: d.hardware_errors,
     ),
     AvalonSensorEntityDescription(
-        key="best_share",
-        name="Best Share",
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:trophy",
-        value_fn=lambda d: d.best_share,
-    ),
-    AvalonSensorEntityDescription(
         key="pool_rejected_pct",
         name="Pool Rejected %",
         native_unit_of_measurement="%",
@@ -314,6 +332,10 @@ async def async_setup_entry(
     entities.append(AvalonMinerHashrateSensor(coordinator, entry, "av"))
     entities.append(AvalonMinerHashrateSensor(coordinator, entry, "30s"))
     entities.append(AvalonMinerHashrateSensor(coordinator, entry, "1m"))
+
+    # Best-share sensors (session + all-time persistent)
+    entities.append(AvalonMinerSessionBestShareSensor(coordinator, entry))
+    entities.append(AvalonMinerAllTimeBestShareSensor(coordinator, entry))
 
     # Dynamic per-hashboard sensors will be added once we have real data
     # We schedule a one-time callback after the first successful poll.
@@ -563,3 +585,119 @@ class AvalonMinerHashboardHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
             return "TH/s"
         _, unit = _format_hashrate(mhs)
         return unit
+
+
+# ---------------------------------------------------------------------------
+# Best-share sensors
+# ---------------------------------------------------------------------------
+
+class AvalonMinerSessionBestShareSensor(AvalonMinerBaseEntity, SensorEntity):
+    """
+    Best share for the current mining session (since last miner boot).
+
+    The value comes directly from the cgminer summary "Best Share" field,
+    which resets to zero every time the miner restarts.  The raw integer is
+    scaled to the most human-readable suffix (K / M / G / T) so a value like
+    4 231 000 000 000 is displayed as "4.231 T" instead of a 13-digit number.
+    """
+
+    def __init__(
+        self,
+        coordinator: AvalonMinerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._ip}_best_share_session"
+        self._attr_name = "Best Share (Session)"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_icon = "mdi:trophy-outline"
+        self._attr_has_entity_name = True
+
+    @property
+    def native_value(self) -> str | None:
+        data: MinerData | None = self.coordinator.data
+        if not data or not data.online:
+            return None
+        value, suffix = _format_share(data.best_share)
+        if suffix:
+            return f"{value} {suffix}"
+        return str(int(value))
+
+    @property
+    def native_unit_of_measurement(self) -> None:
+        return None
+
+
+class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
+    """
+    All-time best share across every session since the integration was set up.
+
+    The previous best is restored from HA storage on startup so it survives
+    both miner reboots and HA restarts.  It is only ever updated upward:
+    if the current session best share exceeds the stored record, the record
+    is updated.
+    """
+
+    def __init__(
+        self,
+        coordinator: AvalonMinerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{self._ip}_best_share_all_time"
+        self._attr_name = "Best Share (All-Time)"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_icon = "mdi:trophy"
+        self._attr_has_entity_name = True
+        self._all_time_best: int = 0
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous all-time best from HA storage on startup."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_sensor_data()
+        if last is not None and last.native_value is not None:
+            # Stored value is already the formatted string; convert back to raw int
+            try:
+                raw = _parse_share_string(str(last.native_value))
+                self._all_time_best = raw
+            except (ValueError, AttributeError):
+                pass
+
+        # Listen for coordinator updates to keep the record current
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self._handle_coordinator_update)
+        )
+
+    def _handle_coordinator_update(self) -> None:
+        """Called on every coordinator poll; update record if session best is higher."""
+        data: MinerData | None = self.coordinator.data
+        if data and data.online and data.best_share > self._all_time_best:
+            self._all_time_best = data.best_share
+            self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> str | None:
+        if self._all_time_best == 0:
+            return None
+        value, suffix = _format_share(self._all_time_best)
+        if suffix:
+            return f"{value} {suffix}"
+        return str(int(value))
+
+    @property
+    def native_unit_of_measurement(self) -> None:
+        return None
+
+
+def _parse_share_string(text: str) -> int:
+    """
+    Convert a formatted share string back to a raw integer.
+
+    Accepts formats like "4.231 T", "812.5 G", "1.5 M", "300.0 K", "500".
+    """
+    _SUFFIXES = {"T": 1_000_000_000_000, "G": 1_000_000_000, "M": 1_000_000, "K": 1_000}
+    parts = text.strip().split()
+    if len(parts) == 2:
+        multiplier = _SUFFIXES.get(parts[1], 1)
+        return int(float(parts[0]) * multiplier)
+    return int(float(parts[0]))
