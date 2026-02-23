@@ -599,6 +599,7 @@ class AvalonMinerSessionBestShareSensor(AvalonMinerBaseEntity, SensorEntity):
     which resets to zero every time the miner restarts.  The raw integer is
     scaled to the most human-readable suffix (K / M / G / T) so a value like
     4 231 000 000 000 is displayed as "4.231 T" instead of a 13-digit number.
+    The suffix is exposed as the unit so HA stores and graphs the numeric part.
     """
 
     def __init__(
@@ -609,23 +610,24 @@ class AvalonMinerSessionBestShareSensor(AvalonMinerBaseEntity, SensorEntity):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{self._ip}_best_share_session"
         self._attr_name = "Best Share (Session)"
-        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_icon = "mdi:trophy-outline"
         self._attr_has_entity_name = True
 
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> float | None:
         data: MinerData | None = self.coordinator.data
         if not data or not data.online:
             return None
-        value, suffix = _format_share(data.best_share)
-        if suffix:
-            return f"{value} {suffix}"
-        return str(int(value))
+        value, _ = _format_share(data.best_share)
+        return value
 
     @property
-    def native_unit_of_measurement(self) -> None:
-        return None
+    def native_unit_of_measurement(self) -> str:
+        data: MinerData | None = self.coordinator.data
+        if not data or not data.online:
+            return ""
+        _, suffix = _format_share(data.best_share)
+        return suffix
 
 
 class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
@@ -636,6 +638,10 @@ class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
     both miner reboots and HA restarts.  It is only ever updated upward:
     if the current session best share exceeds the stored record, the record
     is updated.
+
+    The raw integer is stored internally; native_value returns the scaled
+    float and native_unit_of_measurement returns the matching suffix so HA
+    receives a proper numeric state.
     """
 
     def __init__(
@@ -646,7 +652,6 @@ class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{self._ip}_best_share_all_time"
         self._attr_name = "Best Share (All-Time)"
-        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_icon = "mdi:trophy"
         self._attr_has_entity_name = True
         self._all_time_best: int = 0
@@ -656,10 +661,14 @@ class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
         await super().async_added_to_hass()
         last = await self.async_get_last_sensor_data()
         if last is not None and last.native_value is not None:
-            # Stored value is already the formatted string; convert back to raw int
+            # Stored value is the scaled float; reconstruct raw int using the
+            # stored unit as the suffix multiplier.
             try:
-                raw = _parse_share_string(str(last.native_value))
-                self._all_time_best = raw
+                stored_value = float(last.native_value)
+                stored_unit = last.native_unit_of_measurement or ""
+                self._all_time_best = _parse_share_string(
+                    f"{stored_value} {stored_unit}".strip()
+                )
             except (ValueError, AttributeError):
                 pass
 
@@ -676,17 +685,18 @@ class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
             self.async_write_ha_state()
 
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> float | None:
         if self._all_time_best == 0:
             return None
-        value, suffix = _format_share(self._all_time_best)
-        if suffix:
-            return f"{value} {suffix}"
-        return str(int(value))
+        value, _ = _format_share(self._all_time_best)
+        return value
 
     @property
-    def native_unit_of_measurement(self) -> None:
-        return None
+    def native_unit_of_measurement(self) -> str:
+        if self._all_time_best == 0:
+            return ""
+        _, suffix = _format_share(self._all_time_best)
+        return suffix
 
 
 def _parse_share_string(text: str) -> int:
