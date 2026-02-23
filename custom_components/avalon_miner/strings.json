@@ -1,0 +1,54 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Avalon Miner",
+        "description": "Enter the IP address of your Avalon miner. It must already be reachable on the network (port 4028 open).",
+        "data": {
+          "ip": "IP Address",
+          "port": "API Port (default 4028)"
+        }
+      },
+      "options": {
+        "title": "Miner Startup Configuration",
+        "description": "These settings are applied automatically each time the miner comes online.",
+        "data": {
+          "freq1": "Frequency Zone 1 (MHz) – lowest",
+          "freq2": "Frequency Zone 2 (MHz)",
+          "freq3": "Frequency Zone 3 (MHz)",
+          "freq4": "Frequency Zone 4 (MHz) – highest",
+          "voltage": "Voltage Level (0–60)",
+          "hash_no": "Hash Board Number (0 = all)",
+          "auto_start": "Auto-start hashing when miner connects"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the miner. Make sure it is powered on, reachable on the network, and port 4028 is open.",
+      "frequencies_not_ascending": "Frequencies must be in strictly ascending order: Zone 1 < Zone 2 < Zone 3 < Zone 4."
+    },
+    "abort": {
+      "already_configured": "This miner is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update Miner Configuration",
+        "description": "Changes take effect on the next miner connection (or immediately if the miner is online).",
+        "data": {
+          "freq1": "Frequency Zone 1 (MHz) – lowest",
+          "freq2": "Frequency Zone 2 (MHz)",
+          "freq3": "Frequency Zone 3 (MHz)",
+          "freq4": "Frequency Zone 4 (MHz) – highest",
+          "voltage": "Voltage Level (0–60)",
+          "hash_no": "Hash Board Number (0 = all)",
+          "auto_start": "Auto-start hashing when miner connects"
+        }
+      }
+    },
+    "error": {
+      "frequencies_not_ascending": "Frequencies must be in strictly ascending order: Zone 1 < Zone 2 < Zone 3 < Zone 4."
+    }
+  }
+}
