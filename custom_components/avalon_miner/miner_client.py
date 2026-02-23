@@ -246,6 +246,7 @@ class MinerData:
     output_power_w: int = 0
     hash_board_voltage_mv: float = 0.0
     output_current_a: int = 0
+    energy_consumed_kwh: float = 0.0
 
     # Uptime
     uptime_seconds: int = 0

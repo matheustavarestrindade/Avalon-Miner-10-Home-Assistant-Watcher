@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -64,6 +64,8 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
         )
         self._was_online: bool = False
         self._offline_count: int = 0
+        self._energy_kwh: float = 0.0
+        self._last_energy_ts: datetime | None = None
 
         super().__init__(
             hass,
@@ -154,6 +156,15 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
             )
         except Exception as exc:
             raise UpdateFailed(f"Error communicating with miner {self._client.ip}: {exc}") from exc
+
+        # Accumulate energy (kWh) from instantaneous power readings.
+        # energy += power_W * elapsed_hours
+        now = datetime.now()
+        if self._last_energy_ts is not None and data.output_power_w > 0:
+            elapsed_hours = (now - self._last_energy_ts).total_seconds() / 3600.0
+            self._energy_kwh += data.output_power_w * elapsed_hours / 1000.0
+        self._last_energy_ts = now
+        data.energy_consumed_kwh = round(self._energy_kwh, 4)
 
         return data
 

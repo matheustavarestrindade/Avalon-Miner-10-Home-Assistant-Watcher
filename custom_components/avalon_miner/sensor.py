@@ -14,6 +14,7 @@ Entities created per miner:
     - Output Power           W
     - Hash Board Voltage     V
     - Output Current         A
+    - Energy Consumed        kWh  (cumulative, TOTAL_INCREASING – suitable for Energy Dashboard)
   Fan
     - Fan 1 Speed            RPM
     - Fan 2 Speed            RPM
@@ -53,6 +54,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
+    UnitOfEnergy,
     UnitOfFrequency,
     UnitOfPower,
     UnitOfTemperature,
@@ -176,6 +178,14 @@ SENSOR_DESCRIPTIONS: tuple[AvalonSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.output_current_a,
+    ),
+    AvalonSensorEntityDescription(
+        key="energy_consumed",
+        name="Energy Consumed",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda d: d.energy_consumed_kwh,
     ),
     # --- Fan ---
     AvalonSensorEntityDescription(
