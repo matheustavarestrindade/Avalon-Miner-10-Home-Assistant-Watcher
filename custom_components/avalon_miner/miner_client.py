@@ -16,7 +16,6 @@ from .const import (
     DEFAULT_PORT,
     TCP_COMMAND_TIMEOUT,
     TCP_PROBE_TIMEOUT,
-    CMD_QUERY_HASH_POWER_STATE,
     CMD_QUERY_CURRENT_POOL,
     CMD_QUERY_SUMMARY,
     CMD_QUERY_DETAILS,
@@ -416,23 +415,21 @@ class AvalonMinerClient:
             ))
         return pools
 
-    async def query_hash_power_state(self) -> HashPowerState:
+    @staticmethod
+    def parse_power_state(details: dict[str, Any]) -> HashPowerState:
         """
-        Parse PS[errcode ctrlV boardV current power voltSetting] from ascset|0,hashpower.
+        Extract PS[errcode ctrlV boardV current power voltSetting] from the
+        estats 'MM ID0' record.
+
+        The separate ascset|0,hashpower command returns a plain-text Msg whose
+        format varies by firmware, making reliable parsing fragile.  The same
+        PS array is always present inside the estats response (already fetched
+        by query_details), so we read it from there instead.
         """
-        records = await self._send_command(CMD_QUERY_HASH_POWER_STATE)
-        raw = records[1] if len(records) > 1 else {}
-        msg = raw.get("Msg", {})
+        mod = details.get("MM ID0", {})
         ps: list[int] = []
-        if isinstance(msg, dict):
-            ps = [_safe_int(v) for v in msg.get("PS", [])]
-        elif isinstance(msg, str):
-            # Sometimes Msg is still a plain string – parse it manually
-            # e.g. "ASC 0 set info: PS[0 1220 1314 140 1839 1308]"
-            import re
-            m = re.search(r"PS\[([^\]]+)\]", msg)
-            if m:
-                ps = [int(x) for x in m.group(1).split()]
+        if isinstance(mod, dict):
+            ps = [_safe_int(v) for v in mod.get("PS", [])]
 
         return HashPowerState(
             error=ps[0] if len(ps) > 0 else 0,
@@ -606,14 +603,6 @@ class AvalonMinerClient:
             _LOGGER.warning("[%s] query_details failed: %s", self.ip, exc)
 
         try:
-            power = await self.query_hash_power_state()
-            data.output_power_w = power.output_power
-            data.hash_board_voltage_mv = power.hash_board_voltage / 100.0  # raw → volts (13.14V)
-            data.output_current_a = power.output_current
-        except Exception as exc:
-            _LOGGER.warning("[%s] query_hash_power_state failed: %s", self.ip, exc)
-
-        try:
             data.pools = await self.query_current_pools()
         except Exception as exc:
             _LOGGER.warning("[%s] query_current_pools failed: %s", self.ip, exc)
@@ -640,5 +629,12 @@ class AvalonMinerClient:
                 data.work_mode,
             ) = self.parse_hashboards_and_temps(details, summary)
             data.fan1_rpm, data.fan2_rpm, data.fan_duty_pct = self.parse_fan_data(details)
+
+            # PS[errcode ctrlV boardV current power voltSetting] lives inside
+            # MM ID0 in the estats response – no extra TCP round-trip needed.
+            power = self.parse_power_state(details)
+            data.output_power_w = power.output_power
+            data.hash_board_voltage_mv = power.hash_board_voltage / 100.0  # raw → volts (e.g. 1314 → 13.14 V)
+            data.output_current_a = power.output_current
 
         return data
