@@ -155,13 +155,15 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
                 hash_no=self.hash_no,
             )
         except Exception as exc:
-            raise UpdateFailed(f"Error communicating with miner {self._client.ip}: {exc}") from exc
+            raise UpdateFailed(f"Error communicating with miner {
+                               self._client.ip}: {exc}") from exc
 
         # Accumulate energy (kWh) from instantaneous power readings.
         # energy += power_W * elapsed_hours
         now = datetime.now()
         if self._last_energy_ts is not None and data.output_power_w > 0:
-            elapsed_hours = (now - self._last_energy_ts).total_seconds() / 3600.0
+            elapsed_hours = (
+                now - self._last_energy_ts).total_seconds() / 3600.0
             self._energy_kwh += data.output_power_w * elapsed_hours / 1000.0
         self._last_energy_ts = now
         data.energy_consumed_kwh = round(self._energy_kwh, 4)
@@ -180,9 +182,18 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
             self._client.ip,
         )
         max_attempts = 10
+        time_between_attempts = 30  # seconds
         for attempt in range(1, max_attempts + 1):
             try:
+                _LOGGER.debug(
+                    "[%s] Checking if miner is hashing yet (attempt %d/%d)...",
+                    self._client.ip,
+                    attempt,
+                    max_attempts,
+                )
                 summary = await self._client.query_summary()
+                _LOGGER.debug(
+                    "[%s] Summary MHS 30s: %.1f", self._client.ip, summary.mhs_30s)
                 if summary.mhs_30s <= 5:
                     _LOGGER.info(
                         "[%s] Not ready yet (MHS 30s=%.1f). "
@@ -192,7 +203,7 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
                         attempt,
                         max_attempts,
                     )
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(time_between_attempts)
                     continue
 
                 ok = await self._client.start_hashing(
@@ -204,7 +215,8 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
                     hash_no=self.hash_no,
                 )
                 if ok:
-                    _LOGGER.info("[%s] Hashing started successfully.", self._client.ip)
+                    _LOGGER.info(
+                        "[%s] Hashing started successfully.", self._client.ip)
                     return
                 _LOGGER.warning(
                     "[%s] start_hashing returned False (attempt %d/%d). Retrying.",
@@ -212,7 +224,7 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
                     attempt,
                     max_attempts,
                 )
-                await asyncio.sleep(10)
+                await asyncio.sleep(time_between_attempts)
             except Exception as exc:
                 _LOGGER.warning(
                     "[%s] Error during on_connect attempt %d: %s",
@@ -220,7 +232,7 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
                     attempt,
                     exc,
                 )
-                await asyncio.sleep(10)
+                await asyncio.sleep(time_between_attempts)
 
         _LOGGER.error(
             "[%s] Gave up trying to start hashing after %d attempts.",
