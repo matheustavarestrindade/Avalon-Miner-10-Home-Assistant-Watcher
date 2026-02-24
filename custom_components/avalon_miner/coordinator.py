@@ -186,7 +186,13 @@ class AvalonMinerCoordinator(DataUpdateCoordinator[MinerData]):
         for attempt in range(1, max_attempts + 1):
             try:
                 summary = await self._client.query_summary()
-                if summary.mhs_30s <= 5:
+                _LOGGER.debug(
+                    "[%s] on_connect attempt %d: MHS 30s=%.1f",
+                    self._client.ip,
+                    attempt,
+                    summary.mhs_30s,
+                )
+                if summary.mhs_30s <= 10:
                     _LOGGER.info(
                         "[%s] Not ready yet (MHS 30s=%.1f). "
                         "Waiting 10 s (attempt %d/%d).",
