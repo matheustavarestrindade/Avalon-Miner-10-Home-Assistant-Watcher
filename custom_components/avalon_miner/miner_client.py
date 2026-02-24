@@ -46,6 +46,26 @@ def _is_numeric(value: str) -> bool:
         return False
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Convert *value* to float, returning *default* if it is None or unconvertible."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Convert *value* to int, returning *default* if it is None or unconvertible."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def _is_bool_string(value: str) -> bool:
     return value.lower() in ("true", "false")
 
@@ -341,14 +361,14 @@ class AvalonMinerClient:
         records = await self._send_command(CMD_QUERY_CONTROLLER_VERSION)
         raw = records[1] if len(records) > 1 else {}
         return ControllerVersion(
-            api=raw.get("API", 0.0),
-            product=raw.get("PROD", ""),
-            model=int(raw.get("MODEL", 0)),
-            hw_type=raw.get("HWTYPE", ""),
-            sw_type=raw.get("SWTYPE", ""),
-            version=raw.get("VERSION", ""),
-            dna=raw.get("DNA", ""),
-            mac=raw.get("MAC", ""),
+            api=_safe_float(raw.get("API"), 0.0),
+            product=str(raw.get("PROD") or ""),
+            model=_safe_int(raw.get("MODEL"), 0),
+            hw_type=str(raw.get("HWTYPE") or ""),
+            sw_type=str(raw.get("SWTYPE") or ""),
+            version=str(raw.get("VERSION") or ""),
+            dna=str(raw.get("DNA") or ""),
+            mac=str(raw.get("MAC") or ""),
         )
 
     async def query_summary(self) -> SummaryData:
@@ -358,17 +378,17 @@ class AvalonMinerClient:
         for i in range(8):
             key = f"Board {i} MH/s"
             if key in raw:
-                board_mhs[i] = float(raw[key])
+                board_mhs[i] = _safe_float(raw[key])
         return SummaryData(
-            elapsed=int(raw.get("Elapsed", 0)),
-            mhs_av=float(raw.get("MHS av", 0.0)),
-            mhs_30s=float(raw.get("MHS 30s", 0.0)),
-            mhs_1m=float(raw.get("MHS 1m", 0.0)),
-            accepted=int(raw.get("Accepted", 0)),
-            rejected=int(raw.get("Rejected", 0)),
-            hardware_errors=int(raw.get("Hardware Errors", 0)),
-            best_share=int(raw.get("Best Share", 0)),
-            pool_rejected_pct=float(raw.get("Pool Rejected%", 0.0)),
+            elapsed=_safe_int(raw.get("Elapsed"), 0),
+            mhs_av=_safe_float(raw.get("MHS av"), 0.0),
+            mhs_30s=_safe_float(raw.get("MHS 30s"), 0.0),
+            mhs_1m=_safe_float(raw.get("MHS 1m"), 0.0),
+            accepted=_safe_int(raw.get("Accepted"), 0),
+            rejected=_safe_int(raw.get("Rejected"), 0),
+            hardware_errors=_safe_int(raw.get("Hardware Errors"), 0),
+            best_share=_safe_int(raw.get("Best Share"), 0),
+            pool_rejected_pct=_safe_float(raw.get("Pool Rejected%"), 0.0),
             board_mhs=board_mhs,
         )
 
@@ -384,15 +404,15 @@ class AvalonMinerClient:
             if "POOL" not in rec:
                 continue
             pools.append(PoolData(
-                index=int(rec.get("POOL", 0)),
-                url=str(rec.get("URL", "")),
-                user=str(rec.get("User", "")),
-                status=str(rec.get("Status", "")),
-                accepted=int(rec.get("Accepted", 0)),
-                rejected=int(rec.get("Rejected", 0)),
-                rejected_pct=float(rec.get("Pool Rejected%", 0.0)),
-                stratum_difficulty=float(rec.get("Stratum Difficulty", 0.0)),
-                current_block_height=int(rec.get("Current Block Height", 0)),
+                index=_safe_int(rec.get("POOL"), 0),
+                url=str(rec.get("URL") or ""),
+                user=str(rec.get("User") or ""),
+                status=str(rec.get("Status") or ""),
+                accepted=_safe_int(rec.get("Accepted"), 0),
+                rejected=_safe_int(rec.get("Rejected"), 0),
+                rejected_pct=_safe_float(rec.get("Pool Rejected%"), 0.0),
+                stratum_difficulty=_safe_float(rec.get("Stratum Difficulty"), 0.0),
+                current_block_height=_safe_int(rec.get("Current Block Height"), 0),
             ))
         return pools
 
@@ -401,11 +421,11 @@ class AvalonMinerClient:
         Parse PS[errcode ctrlV boardV current power voltSetting] from ascset|0,hashpower.
         """
         records = await self._send_command(CMD_QUERY_HASH_POWER_STATE)
-        raw = records[0] if records else {}
+        raw = records[1] if len(records) > 1 else {}
         msg = raw.get("Msg", {})
         ps: list[int] = []
         if isinstance(msg, dict):
-            ps = [int(v) for v in msg.get("PS", [])]
+            ps = [_safe_int(v) for v in msg.get("PS", [])]
         elif isinstance(msg, str):
             # Sometimes Msg is still a plain string – parse it manually
             # e.g. "ASC 0 set info: PS[0 1220 1314 140 1839 1308]"
@@ -455,15 +475,15 @@ class AvalonMinerClient:
             freqs = mod.get(f"SF{i}", [0, 0, 0, 0])
             hashboards.append(HashboardData(
                 board_id=i,
-                frequencies=[int(f) for f in freqs],
+                frequencies=[_safe_int(f) for f in freqs],
                 hashrate_mhs=summary.board_mhs.get(i, 0.0),
             ))
 
-        temp_current = float(mod.get("Temp", 0.0))
-        temp_avg = float(mod.get("TAvg", 0.0))
-        temp_max = float(mod.get("TMax", 0.0))
+        temp_current = _safe_float(mod.get("Temp"), 0.0)
+        temp_avg = _safe_float(mod.get("TAvg"), 0.0)
+        temp_max = _safe_float(mod.get("TMax"), 0.0)
         soft_off = bool(mod.get("SoftOFF", 0))
-        work_mode = int(mod.get("WORKMODE", 0))
+        work_mode = _safe_int(mod.get("WORKMODE"), 0)
 
         return hashboards, temp_current, temp_avg, temp_max, soft_off, work_mode
 
@@ -471,8 +491,8 @@ class AvalonMinerClient:
     def parse_fan_data(details: dict[str, Any]) -> tuple[int, int, int]:
         """Return (fan1_rpm, fan2_rpm, fan_duty_pct) from estats MM ID0."""
         mod = details.get("MM ID0", {})
-        fan1 = int(mod.get("Fan1", 0))
-        fan2 = int(mod.get("Fan2", 0))
+        fan1 = _safe_int(mod.get("Fan1"), 0)
+        fan2 = _safe_int(mod.get("Fan2"), 0)
         fan_r_raw = mod.get("FanR", "0%")
         try:
             fan_duty = int(str(fan_r_raw).rstrip("%"))
