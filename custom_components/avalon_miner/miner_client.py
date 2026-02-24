@@ -431,8 +431,6 @@ class AvalonMinerClient:
         if isinstance(mod, dict):
             ps = [_safe_int(v) for v in mod.get("PS", [])]
 
-        _LOGGER.debug("parse_power_state: MM ID0 keys=%s PS=%s", list(mod.keys()) if isinstance(mod, dict) else mod, ps)
-
         return HashPowerState(
             error=ps[0] if len(ps) > 0 else 0,
             controller_voltage=ps[1] if len(ps) > 1 else 0,

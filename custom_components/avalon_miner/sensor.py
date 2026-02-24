@@ -337,19 +337,13 @@ async def async_setup_entry(
     entities.append(AvalonMinerSessionBestShareSensor(coordinator, entry))
     entities.append(AvalonMinerAllTimeBestShareSensor(coordinator, entry))
 
-    # Dynamic per-hashboard sensors are added once, on the first successful
-    # poll where the miner is online.  The listener unregisters itself after
-    # that so it doesn't try to re-add the same entities on every update.
-    cancel_listener: list[Any] = []  # mutable container so the closure can reach it
-
+    # Dynamic per-hashboard sensors will be added once we have real data.
+    # async_add_listener requires a plain (sync) callable, so this must not be
+    # an async def – async_add_entities itself is synchronous.
     def _add_hashboard_sensors(_: Any = None) -> None:
         data: MinerData = coordinator.data
         if not data or not data.online:
             return
-        # Unregister immediately so this only runs once.
-        if cancel_listener:
-            cancel_listener[0]()
-
         board_entities: list[SensorEntity] = []
         for board in data.hashboards:
             board_entities.append(
@@ -369,8 +363,8 @@ async def async_setup_entry(
             )
         async_add_entities(board_entities)
 
-    # async_add_listener returns a callable that removes the listener.
-    cancel_listener.append(coordinator.async_add_listener(_add_hashboard_sensors))
+    # Register listener so hashboard entities are created after the first poll
+    coordinator.async_add_listener(_add_hashboard_sensors)
 
     async_add_entities(entities)
 
@@ -437,9 +431,10 @@ _HASHRATE_LABEL = {
 
 class AvalonMinerHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
     """
-    Hashrate sensor with a fixed TH/s unit so HA's recorder never sees a
-    unit change.  The value is always expressed in TH/s (1 TH/s = 1 000 000
-    MH/s), which is the natural operating scale for an Avalon 10.
+    Hashrate sensor that automatically scales its unit to the appropriate tier:
+      MH/s → GH/s → TH/s
+    The unit is re-evaluated on every state update so the dashboard always
+    shows the most human-readable value.
     """
 
     def __init__(
@@ -452,7 +447,6 @@ class AvalonMinerHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
         self._period = period
         self._attr_unique_id = f"{self._ip}_hashrate_{period}"
         self._attr_name = _HASHRATE_LABEL[period]
-        self._attr_native_unit_of_measurement = "TH/s"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_icon = "mdi:pickaxe"
         self._attr_has_entity_name = True
@@ -463,7 +457,17 @@ class AvalonMinerHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
         if not data or not data.online:
             return None
         mhs = _HASHRATE_FIELD[self._period](data)
-        return round(mhs / 1_000_000, 4)
+        value, _ = _format_hashrate(mhs)
+        return value
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        data: MinerData | None = self.coordinator.data
+        if not data or not data.online:
+            return "TH/s"
+        mhs = _HASHRATE_FIELD[self._period](data)
+        _, unit = _format_hashrate(mhs)
+        return unit
 
 
 # ---------------------------------------------------------------------------
