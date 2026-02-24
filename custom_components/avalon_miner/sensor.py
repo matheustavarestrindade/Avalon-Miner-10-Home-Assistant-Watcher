@@ -337,9 +337,10 @@ async def async_setup_entry(
     entities.append(AvalonMinerSessionBestShareSensor(coordinator, entry))
     entities.append(AvalonMinerAllTimeBestShareSensor(coordinator, entry))
 
-    # Dynamic per-hashboard sensors will be added once we have real data
-    # We schedule a one-time callback after the first successful poll.
-    async def _add_hashboard_sensors(_: Any = None) -> None:
+    # Dynamic per-hashboard sensors will be added once we have real data.
+    # async_add_listener requires a plain (sync) callable, so this must not be
+    # an async def – async_add_entities itself is synchronous.
+    def _add_hashboard_sensors(_: Any = None) -> None:
         data: MinerData = coordinator.data
         if not data or not data.online:
             return
