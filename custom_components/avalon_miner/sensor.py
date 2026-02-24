@@ -437,9 +437,12 @@ _HASHRATE_LABEL = {
 
 class AvalonMinerHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
     """
-    Hashrate sensor with a fixed TH/s unit so HA's recorder never sees a
-    unit change.  The value is always expressed in TH/s (1 TH/s = 1 000 000
-    MH/s), which is the natural operating scale for an Avalon 10.
+    Hashrate sensor with a fixed MH/s native unit so HA's recorder always
+    stores values in the same unit and statistics are never suppressed.
+
+    MH/s is what the miner reports natively (MHS av / MHS 30s / MHS 1m).
+    The HA UI allows the user to change the display unit to GH/s or TH/s
+    via Settings → Entity → Unit, without affecting stored statistics.
     """
 
     def __init__(
@@ -452,7 +455,8 @@ class AvalonMinerHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
         self._period = period
         self._attr_unique_id = f"{self._ip}_hashrate_{period}"
         self._attr_name = _HASHRATE_LABEL[period]
-        self._attr_native_unit_of_measurement = "TH/s"
+        self._attr_native_unit_of_measurement = "MH/s"
+        self._attr_suggested_display_precision = 2
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_icon = "mdi:pickaxe"
         self._attr_has_entity_name = True
@@ -462,8 +466,7 @@ class AvalonMinerHashrateSensor(AvalonMinerBaseEntity, SensorEntity):
         data: MinerData | None = self.coordinator.data
         if not data or not data.online:
             return None
-        mhs = _HASHRATE_FIELD[self._period](data)
-        return round(mhs / 1_000_000, 4)
+        return round(_HASHRATE_FIELD[self._period](data), 2)
 
 
 # ---------------------------------------------------------------------------
