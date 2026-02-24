@@ -228,7 +228,8 @@ class PoolData:
 @dataclass
 class HashboardData:
     board_id: int = 0
-    frequencies: list[int] = field(default_factory=list)  # 4 frequency zones (MHz)
+    frequencies: list[int] = field(
+        default_factory=list)  # 4 frequency zones (MHz)
     hashrate_mhs: float = 0.0
 
 
@@ -326,13 +327,16 @@ class AvalonMinerClient:
                     except Exception:
                         pass
             except asyncio.TimeoutError as exc:
-                raise TimeoutError(f"Command '{command}' to {self.ip} timed out") from exc
+                raise TimeoutError(f"Command '{command}' to {
+                                   self.ip} timed out") from exc
             except OSError as exc:
-                raise ConnectionError(f"Cannot connect to {self.ip}:{self.port}: {exc}") from exc
+                raise ConnectionError(f"Cannot connect to {self.ip}:{
+                                      self.port}: {exc}") from exc
 
             text = raw.decode(errors="replace").strip()
             if not text:
-                raise ValueError(f"Empty response from {self.ip} for command '{command}'")
+                raise ValueError(f"Empty response from {
+                                 self.ip} for command '{command}'")
 
             _LOGGER.debug("[%s] ← %s", self.ip, text[:200])
             return parse_miner_response(text)
@@ -411,8 +415,10 @@ class AvalonMinerClient:
                 accepted=_safe_int(rec.get("Accepted"), 0),
                 rejected=_safe_int(rec.get("Rejected"), 0),
                 rejected_pct=_safe_float(rec.get("Pool Rejected%"), 0.0),
-                stratum_difficulty=_safe_float(rec.get("Stratum Difficulty"), 0.0),
-                current_block_height=_safe_int(rec.get("Current Block Height"), 0),
+                stratum_difficulty=_safe_float(
+                    rec.get("Stratum Difficulty"), 0.0),
+                current_block_height=_safe_int(
+                    rec.get("Current Block Height"), 0),
             ))
         return pools
 
@@ -432,7 +438,7 @@ class AvalonMinerClient:
             import re
             m = re.search(r"PS\[([^\]]+)\]", msg)
             if m:
-                ps = [int(x) for x in m.group(1).split()]
+                ps = [_safe_int(x) for x in m.group(1).split()]
 
         return HashPowerState(
             error=ps[0] if len(ps) > 0 else 0,
@@ -528,9 +534,11 @@ class AvalonMinerClient:
     ) -> dict[str, Any]:
         for freq in (freq1, freq2, freq3, freq4):
             if freq not in VALID_MINER_FREQUENCIES:
-                raise ValueError(f"Frequency {freq} MHz is not a valid Avalon frequency")
+                raise ValueError(
+                    f"Frequency {freq} MHz is not a valid Avalon frequency")
         if not (freq1 < freq2 < freq3 < freq4):
-            raise ValueError("Frequencies must be in strictly ascending order (f1 < f2 < f3 < f4)")
+            raise ValueError(
+                "Frequencies must be in strictly ascending order (f1 < f2 < f3 < f4)")
         records = await self._send_command(cmd_set_frequency(freq1, freq2, freq3, freq4, hash_no))
         return records[0] if records else {}
 
@@ -591,7 +599,8 @@ class AvalonMinerClient:
         try:
             data.controller = await self.query_controller_version()
         except Exception as exc:
-            _LOGGER.warning("[%s] query_controller_version failed: %s", self.ip, exc)
+            _LOGGER.warning(
+                "[%s] query_controller_version failed: %s", self.ip, exc)
 
         summary = SummaryData()
         try:
@@ -608,15 +617,18 @@ class AvalonMinerClient:
         try:
             power = await self.query_hash_power_state()
             data.output_power_w = power.output_power
-            data.hash_board_voltage_mv = power.hash_board_voltage / 100.0  # raw → volts (13.14V)
+            data.hash_board_voltage_mv = power.hash_board_voltage / \
+                100.0  # raw → volts (13.14V)
             data.output_current_a = power.output_current
         except Exception as exc:
-            _LOGGER.warning("[%s] query_hash_power_state failed: %s", self.ip, exc)
+            _LOGGER.warning(
+                "[%s] query_hash_power_state failed: %s", self.ip, exc)
 
         try:
             data.pools = await self.query_current_pools()
         except Exception as exc:
-            _LOGGER.warning("[%s] query_current_pools failed: %s", self.ip, exc)
+            _LOGGER.warning(
+                "[%s] query_current_pools failed: %s", self.ip, exc)
 
         # Populate from summary
         data.mhs_av = summary.mhs_av
@@ -639,6 +651,7 @@ class AvalonMinerClient:
                 data.soft_off,
                 data.work_mode,
             ) = self.parse_hashboards_and_temps(details, summary)
-            data.fan1_rpm, data.fan2_rpm, data.fan_duty_pct = self.parse_fan_data(details)
+            data.fan1_rpm, data.fan2_rpm, data.fan_duty_pct = self.parse_fan_data(
+                details)
 
         return data

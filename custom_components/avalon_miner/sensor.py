@@ -347,19 +347,24 @@ async def async_setup_entry(
         board_entities: list[SensorEntity] = []
         for board in data.hashboards:
             board_entities.append(
-                AvalonMinerHashboardFreqSensor(coordinator, entry, board.board_id, zone=0)
+                AvalonMinerHashboardFreqSensor(
+                    coordinator, entry, board.board_id, zone=0)
             )
             board_entities.append(
-                AvalonMinerHashboardFreqSensor(coordinator, entry, board.board_id, zone=1)
+                AvalonMinerHashboardFreqSensor(
+                    coordinator, entry, board.board_id, zone=1)
             )
             board_entities.append(
-                AvalonMinerHashboardFreqSensor(coordinator, entry, board.board_id, zone=2)
+                AvalonMinerHashboardFreqSensor(
+                    coordinator, entry, board.board_id, zone=2)
             )
             board_entities.append(
-                AvalonMinerHashboardFreqSensor(coordinator, entry, board.board_id, zone=3)
+                AvalonMinerHashboardFreqSensor(
+                    coordinator, entry, board.board_id, zone=3)
             )
             board_entities.append(
-                AvalonMinerHashboardHashrateSensor(coordinator, entry, board.board_id)
+                AvalonMinerHashboardHashrateSensor(
+                    coordinator, entry, board.board_id)
             )
         async_add_entities(board_entities)
 
@@ -392,7 +397,8 @@ class AvalonMinerBaseEntity(CoordinatorEntity[AvalonMinerCoordinator]):
         model = None
         sw_version = None
         if data and data.online:
-            model = str(data.controller.model) if data.controller.model else None
+            model = str(
+                data.controller.model) if data.controller.model else None
             sw_version = data.controller.version or None
 
         return {
@@ -418,9 +424,9 @@ class AvalonMinerBaseEntity(CoordinatorEntity[AvalonMinerCoordinator]):
 # ---------------------------------------------------------------------------
 
 _HASHRATE_FIELD = {
-    "av":  lambda d: d.mhs_av,
+    "av": lambda d: d.mhs_av,
     "30s": lambda d: d.mhs_30s,
-    "1m":  lambda d: d.mhs_1m,
+    "1m": lambda d: d.mhs_1m,
 }
 _HASHRATE_LABEL = {
     "av":  "Hashrate (Average)",
@@ -521,7 +527,8 @@ class AvalonMinerHashboardFreqSensor(AvalonMinerBaseEntity, SensorEntity):
         super().__init__(coordinator, entry)
         self._board_id = board_id
         self._zone = zone
-        self._attr_unique_id = f"{self._ip}_board{board_id}_freq_zone{zone + 1}"
+        self._attr_unique_id = f"{self._ip}_board{
+            board_id}_freq_zone{zone + 1}"
         self._attr_name = f"Board {board_id} Freq Zone {zone + 1}"
         self._attr_native_unit_of_measurement = UnitOfFrequency.MEGAHERTZ
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -675,7 +682,8 @@ class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
 
         # Listen for coordinator updates to keep the record current
         self.async_on_remove(
-            self.coordinator.async_add_listener(self._handle_coordinator_update)
+            self.coordinator.async_add_listener(
+                self._handle_coordinator_update)
         )
 
     def _handle_coordinator_update(self) -> None:
@@ -706,7 +714,8 @@ def _parse_share_string(text: str) -> int:
 
     Accepts formats like "4.231 T", "812.5 G", "1.5 M", "300.0 K", "500".
     """
-    _SUFFIXES = {"T": 1_000_000_000_000, "G": 1_000_000_000, "M": 1_000_000, "K": 1_000}
+    _SUFFIXES = {"T": 1_000_000_000_000,
+                 "G": 1_000_000_000, "M": 1_000_000, "K": 1_000}
     parts = text.strip().split()
     if len(parts) == 2:
         multiplier = _SUFFIXES.get(parts[1], 1)
