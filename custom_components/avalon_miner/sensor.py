@@ -685,6 +685,11 @@ class AvalonMinerAllTimeBestShareSensor(AvalonMinerBaseEntity, RestoreSensor):
             self.async_write_ha_state()
 
     @property
+    def available(self) -> bool:
+        """Available whenever a best-share record exists, regardless of miner state."""
+        return self._all_time_best > 0
+
+    @property
     def native_value(self) -> float | None:
         if self._all_time_best == 0:
             return None
